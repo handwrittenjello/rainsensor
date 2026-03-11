@@ -1,0 +1,67 @@
+# Rain Sensor Bypass Controller — Configuration
+# Copy to config.yaml and edit for your location and hardware.
+
+# ── Geographic location ──────────────────────────────────────────────────────
+# Used for OpenWeatherMap One Call API and the web dashboard radar map.
+location:
+  lat: 37.7749    # decimal degrees, positive = north
+  lon: -122.4194  # decimal degrees, negative = west
+
+# ── Relay HAT ─────────────────────────────────────────────────────────────────
+# GeeekPi DockerPi 4-Channel Relay (EP-0099) — I2C controlled.
+# Wire Channel 1's COM terminal to SEN terminal ① and NC terminal to SEN terminal ②
+# on the Hunter X Pro. Remove the factory jumper plate between the SEN terminals first.
+relay:
+  driver: i2c      # "i2c" for GeeekPi EP-0099 | "gpio" for Waveshare/SainSmart boards
+  channel: 1       # relay channel to use (1–4 for the EP-0099)
+  i2c:
+    address: 0x10  # GeeekPi default I2C address; confirm with: sudo i2cdetect -y 1
+    bus: 1         # I2C bus number (1 on all modern Pi models)
+  # ── GPIO driver (uncomment if using a GPIO-based relay HAT instead) ────────
+  # driver: gpio
+  # channel: 1
+  # active_low: true   # true = GPIO LOW energizes relay (Waveshare, SainSmart)
+  # gpio:
+  #   pin: 26          # BCM pin number (Waveshare ch1=26, ch2=20, ch3=21)
+
+# ── Suppression thresholds ────────────────────────────────────────────────────
+# Watering is suppressed if ANY of these conditions are met.
+thresholds:
+  # Skip if rain probability exceeds this % in the next N hours
+  rain_probability_pct: 50       # 0–100; default 50%
+  rain_probability_hours: 3      # look-ahead window (matches hourly[] entries)
+
+  # Skip if total forecast rainfall in the look-ahead window exceeds this
+  forecast_rain_mm: 2.5          # millimeters; default 2.5mm
+
+  # Skip if accumulated rainfall in the past 24 hours exceeds this
+  recent_rain_mm: 5.0            # millimeters; default 5.0mm
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+# Times at which the controller checks weather and sets the relay.
+# "05:30" runs before the typical 06:00 sprinkler schedule.
+# "22:00" pre-sets the relay overnight for early-morning runs.
+schedule:
+  times:
+    - "05:30"
+    - "22:00"
+  run_on_start: true   # run a check immediately when the service starts
+
+# ── Weather API ───────────────────────────────────────────────────────────────
+weather:
+  cache_ttl_minutes: 30   # re-use cached forecast if it's younger than this
+
+# ── File paths ────────────────────────────────────────────────────────────────
+paths:
+  log_file:   /var/log/rain-sensor/rain_sensor.log
+  state_file: /var/lib/rain-sensor/state.json
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level: INFO      # DEBUG | INFO | WARNING | ERROR
+  console: true    # also write to stdout (captured by systemd journal)
+
+# ── Web dashboard ─────────────────────────────────────────────────────────────
+web:
+  host: 0.0.0.0    # listen on all interfaces so you can reach it from any device
+  port: 5000

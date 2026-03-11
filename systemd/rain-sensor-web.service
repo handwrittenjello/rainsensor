@@ -1,0 +1,23 @@
+[Unit]
+Description=Rain Sensor Web Dashboard
+Documentation=https://github.com/YOUR_USER/rain-sensor
+After=network-online.target rain-sensor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/rain-sensor
+EnvironmentFile=/opt/rain-sensor/.env
+ExecStart=/opt/rain-sensor/venv/bin/python -m rain_sensor web \
+    --config /opt/rain-sensor/config.yaml
+
+Restart=on-failure
+RestartSec=10
+
+# Allow I2C bus access so the web service can toggle the relay via /api/override
+SupplementaryGroups=i2c gpio
+
+[Install]
+WantedBy=multi-user.target

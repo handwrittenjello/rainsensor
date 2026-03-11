@@ -1,0 +1,30 @@
+[Unit]
+Description=Rain Sensor Sprinkler Bypass Controller (scheduler)
+Documentation=https://github.com/YOUR_USER/rain-sensor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/rain-sensor
+EnvironmentFile=/opt/rain-sensor/.env
+ExecStart=/opt/rain-sensor/venv/bin/python -m rain_sensor run \
+    --config /opt/rain-sensor/config.yaml
+ExecStop=/bin/kill -TERM $MAINPID
+
+Restart=on-failure
+RestartSec=30
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Create required directories with correct ownership before start
+ExecStartPre=/bin/mkdir -p /var/log/rain-sensor /var/lib/rain-sensor
+ExecStartPre=/bin/chown pi:pi /var/log/rain-sensor /var/lib/rain-sensor
+
+# Allow I2C bus access (and GPIO for future/alternative boards)
+SupplementaryGroups=i2c gpio
+
+[Install]
+WantedBy=multi-user.target

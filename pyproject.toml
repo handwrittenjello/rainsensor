@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "rain-sensor"
+version = "1.0.0"
+description = "Predictive rain sensor bypass for Hunter X Pro sprinkler systems"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "smbus2>=0.4.3",
+    "schedule>=1.2.0",
+    "PyYAML>=6.0.1",
+    "python-dotenv>=1.0.0",
+    "Flask>=3.0.0",
+]
+
+[project.optional-dependencies]
+gpio = ["RPi.GPIO>=0.7.1"]
+dev  = ["pytest>=8.0", "pytest-mock>=3.14"]
+
+[project.scripts]
+rain-sensor = "rain_sensor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rain_sensor*"]
