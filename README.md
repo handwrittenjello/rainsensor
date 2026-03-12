@@ -2,32 +2,38 @@
 
 A Raspberry Pi–based smart rain sensor bypass for **Hunter X Pro** (and similar) sprinkler
 systems. Instead of reacting to rain *while it's falling*, this controller checks
-**OpenWeatherMap forecasts** and opens the sprinkler's sensor circuit *before* a scheduled
+**OpenWeatherMap forecasts** and closes the sprinkler's sensor circuit *before* a scheduled
 watering run — preventing waste when rain is already on its way.
 
-A built-in web dashboard shows current status, a 30-day suppression history chart, and a
-live precipitation radar map centered on your location.
+A built-in web dashboard shows current status, a 30-day suppression history chart, a live
+precipitation radar map, and historical rainfall data stored in a local SQLite database.
 
 ---
 
 ## How It Works
 
 The Hunter X Pro has two **SEN** terminals normally bridged by a factory jumper plate.
-Removing that jumper and substituting a relay contact in its place replicates exactly
-what a commercial rain sensor does:
+Removing that jumper and wiring a relay contact in its place replicates exactly what a
+commercial rain sensor does:
 
-| Circuit state | Hunter behaviour |
+| SEN terminal circuit | Hunter behaviour |
 |---|---|
-| Terminals shorted (closed) | Watering runs normally |
-| Terminals open (open circuit) | Watering suppressed |
+| Terminals shorted (closed) | Watering **suppressed** (mimics wet rain sensor) |
+| Terminals open | Watering **allowed** (mimics dry/absent sensor) |
+
+> **Important:** The Hunter X Pro holds ~24 V DC across the SEN terminals to detect the
+> sensor state. A shorted circuit signals "sensor is wet → suppress watering." An open
+> circuit signals "dry/no sensor → run normally."
 
 This controller wires the relay's **NC (Normally Closed)** contact across those terminals:
 
-- **Relay de-energized** (default / Pi off): NC is closed → Hunter runs on schedule
-- **Relay energized** (rain forecast): NC opens → Hunter suppresses watering
+| Relay state | NC contact | SEN circuit | Hunter behaviour |
+|---|---|---|---|
+| **De-energized** (default) | Closed | Shorted | Watering **suppressed** |
+| **Energized** | Open | Open | Watering **allowed** |
 
-The fail-safe is deliberate: if the Pi loses power, the relay de-energizes and the lawn
-continues to water on schedule. A Pi failure causes waste, not drought.
+**Fail-safe:** If the Pi loses power, the relay de-energizes and the NC contact closes,
+suppressing watering. This conserves water rather than risking an unscheduled run.
 
 ---
 
@@ -39,8 +45,6 @@ continues to water on schedule. A Pi failure causes waste, not drought.
 | **GeeekPi DockerPi 4-Channel Relay (EP-0099)** | [Amazon B07Q2P9D7K](https://www.amazon.com/dp/B07Q2P9D7K) |
 | Hunter X Pro controller | Any firmware revision |
 | Two short wires | 18–22 AWG, any colour |
-
-No additional hardware is required. The relay HAT already installed on the Pi is all you need.
 
 ---
 
@@ -63,16 +67,19 @@ GeeekPi EP-0099 Relay HAT          Hunter X Pro Controller
   Channel 1  NC  ──── wire ──────── SEN terminal ②
 ```
 
-> **Important:** Use the **NC** (Normally Closed) terminal, not NO (Normally Open).
-> The NO terminal will produce the opposite logic.
+> **Use the NC terminal** (Normally Closed), not NO (Normally Open).
 
-> **Safety:** Both SEN terminals are a dry contact with no dangerous voltage.
-> Do **not** wire the relay to any 24 VAC zone terminal — only the SEN posts.
+> **Safety:** The SEN terminals carry ~24 V DC for sensor detection — safe for relay
+> contacts but **do not wire to a bare GPIO pin**, which is rated for 3.3 V / 16 mA.
+> The relay's galvanically isolated contacts protect the Pi completely.
 
-> **Why not a bare GPIO pin?** The Hunter may put up to 24 VAC across the SEN
-> terminals to detect continuity. A GPIO pin is rated for 3.3 V / 16 mA — direct
-> connection would instantly destroy the Pi. The relay's galvanically isolated contacts
-> protect it completely.
+> **Never** connect the relay to a 24 VAC zone terminal or the common bus.
+
+### Step 3 — Verify wiring
+
+With the Pi **off** (relay de-energized → NC closed → SEN shorted), the Hunter X Pro
+should show a rain-sensor suppression indicator. Power the Pi on and the relay will
+energize (NC opens, SEN open) and watering should be allowed.
 
 ---
 
@@ -106,15 +113,12 @@ If nothing appears, check that the HAT is firmly seated and I2C is enabled.
 ### Smoke-test the relay (no Python needed)
 
 ```bash
-# Energize Channel 1 — relay clicks, LED turns on, NC contact opens
+# Energize Channel 1 — relay clicks, LED on, NC opens → SEN open → watering allowed
 i2cset -y 1 0x10 0x01 0xFF
 
-# De-energize — relay clicks, LED off, NC contact closes
+# De-energize — relay clicks, LED off, NC closes → SEN shorted → watering suppressed
 i2cset -y 1 0x10 0x01 0x00
 ```
-
-Watch the Hunter X Pro display — when the relay is energized (NC open), the controller
-should show a rain-sensor indicator or simply prevent zone activation.
 
 ---
 
@@ -123,19 +127,27 @@ should show a rain-sensor indicator or simply prevent zone activation.
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USER/rain-sensor.git /opt/rain-sensor
-cd /opt/rain-sensor
+git clone https://github.com/YOUR_USER/rain-sensor.git /home/pi/rainsensor
+cd /home/pi/rainsensor
 ```
 
-### 2. Create a virtual environment and install dependencies
+### 2. Install dependencies (no virtual environment)
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -e .
+pip3 install --user --ignore-requires-python -e .
 ```
 
-### 3. Configure
+> `--ignore-requires-python` is needed if you're on Python 3.9 (Raspbian Bullseye).
+> The code is fully compatible with 3.9 despite the pyproject.toml specifying >=3.10.
+
+### 3. Create runtime directories
+
+```bash
+sudo mkdir -p /var/lib/rain-sensor /var/log/rain-sensor
+sudo chown pi:pi /var/lib/rain-sensor /var/log/rain-sensor
+```
+
+### 4. Configure
 
 ```bash
 cp config.yaml.example config.yaml
@@ -144,19 +156,23 @@ nano config.yaml          # set your lat/lon and review thresholds
 
 ```bash
 cp .env.example .env
-nano .env                 # paste your OpenWeatherMap API key
-chmod 600 .env            # protect the secret
+nano .env                 # paste your OpenWeatherMap One Call API 3.0 key
+chmod 600 .env
 ```
 
 Get a free API key at [openweathermap.org](https://openweathermap.org/api).
-The **One Call API 3.0** free tier allows 1,000 calls/day — this controller uses at most
-~5/day under default settings.
+The One Call API 3.0 free tier allows 1,000 calls/day — this controller uses at most ~5/day
+under default settings.
 
 ---
 
 ## Configuration Reference
 
 All settings live in `config.yaml`. Secrets (API key) go in `.env`.
+
+Both files are excluded from git via `.gitignore`. All runtime data (SQLite database,
+state file, logs) is stored under `/var/lib/rain-sensor/` and `/var/log/rain-sensor/`,
+which are also outside the project directory.
 
 ```yaml
 location:
@@ -173,8 +189,8 @@ relay:
 thresholds:
   rain_probability_pct:   50   # suppress if PoP >= 50% in look-ahead window
   rain_probability_hours:  3   # hours ahead to check PoP and rain volume
-  forecast_rain_mm:       2.5  # suppress if forecast total >= 2.5 mm
-  recent_rain_mm:         5.0  # suppress if past-24h total >= 5.0 mm
+  forecast_rain_mm:       2.5  # suppress if forecast total >= 2.5 mm (~0.10 in)
+  recent_rain_mm:         5.0  # suppress if past-24h total >= 5.0 mm (~0.20 in)
 
 schedule:
   times: ["05:30", "22:00"]    # run checks at these times (HH:MM, 24-hour)
@@ -186,6 +202,7 @@ weather:
 paths:
   log_file:   /var/log/rain-sensor/rain_sensor.log
   state_file: /var/lib/rain-sensor/state.json
+  db_file:    /var/lib/rain-sensor/rain_sensor.db   # SQLite historical database
 
 logging:
   level: INFO      # DEBUG | INFO | WARNING | ERROR
@@ -198,7 +215,7 @@ web:
 
 ### Threshold tuning guide
 
-| Your goal | Recommended change |
+| Goal | Recommended change |
 |---|---|
 | More aggressive suppression | Lower `rain_probability_pct` (e.g., 30%) |
 | Less suppression on light drizzle | Raise `forecast_rain_mm` (e.g., 5.0 mm) |
@@ -207,32 +224,72 @@ web:
 
 ---
 
-## CLI Reference
+## Running as a Service (pm2)
+
+This project uses **pm2** for process management rather than systemd.
+
+### Install pm2
 
 ```bash
-# Start the scheduler (blocking — used by systemd)
-python -m rain_sensor run
-
-# One-shot weather check + relay update, then exit
-python -m rain_sensor check
-
-# Manually energize relay (suppress watering) and lock it
-python -m rain_sensor force-close
-
-# Manually de-energize relay (allow watering) and lock it
-python -m rain_sensor force-open
-
-# Remove the manual lock, return to automatic
-python -m rain_sensor clear-override
-
-# Show current state, last decision, and recent rainfall
-python -m rain_sensor status
-
-# Start the web dashboard (blocking)
-python -m rain_sensor web --port 5000
+sudo npm install -g pm2
 ```
 
-All commands accept `--config PATH` to point at a non-default config file.
+### Start both services
+
+```bash
+cd /home/pi/rainsensor
+pm2 start ecosystem.config.js
+```
+
+### Enable auto-start on boot
+
+```bash
+pm2 save
+pm2 startup   # this prints a command — copy and run it with sudo
+# Example output:
+# sudo env PATH=$PATH:/usr/bin /usr/local/lib/node_modules/pm2/bin/pm2 startup systemd -u pi --hp /home/pi
+pm2 save --force   # save the process list after running the above
+```
+
+### Common pm2 commands
+
+```bash
+pm2 list                        # show process status
+pm2 logs rain-sensor            # tail scheduler logs
+pm2 logs rain-sensor-web        # tail web dashboard logs
+pm2 restart all                 # restart both services
+pm2 restart rain-sensor         # restart scheduler only
+pm2 delete all && pm2 start ecosystem.config.js   # full reset
+```
+
+---
+
+## CLI Reference
+
+> **Note:** `--config PATH` must come **before** the subcommand.
+
+```bash
+# Start the scheduler (blocking — used by pm2)
+python3 -m rain_sensor --config config.yaml run
+
+# Start the web dashboard (blocking — used by pm2)
+python3 -m rain_sensor --config config.yaml web
+
+# One-shot weather check + relay update, then exit
+python3 -m rain_sensor --config config.yaml check
+
+# Manually suppress watering (locks relay, ignores schedule)
+python3 -m rain_sensor --config config.yaml force-close
+
+# Manually allow watering (locks relay, ignores schedule)
+python3 -m rain_sensor --config config.yaml force-open
+
+# Remove the manual lock, return to automatic
+python3 -m rain_sensor --config config.yaml clear-override
+
+# Show current state, last decision, and recent rainfall
+python3 -m rain_sensor --config config.yaml status
+```
 
 ---
 
@@ -244,50 +301,84 @@ Once the web service is running, open a browser on any device on your local netw
 http://raspberrypi.local:5000
 ```
 
-(Replace `raspberrypi` with your Pi's hostname, or use its IP address.)
+(Replace `raspberrypi.local` with your Pi's hostname or IP address.)
 
 The dashboard shows:
 
-- **Current Status** — relay state, manual override, recent rainfall, last check time
-- **Next 6-Hour Forecast** — hourly precipitation probability bars and rain amounts
-- **Manual Controls** — Force Suppress / Force Allow / Clear Override buttons
-- **30-Day History** — stacked bar chart showing suppressed vs. allowed watering days
-- **Radar Map** — live OpenWeatherMap precipitation overlay on a Leaflet.js map
+- **Current Status** — relay state, manual override indicator, recent rainfall (inches),
+  last check time, and last decision reasons
+- **Override Banner** — prominent yellow/orange alert when a manual override is active
+- **Next 6-Hour Forecast** — hourly precipitation probability and rain amounts in inches,
+  temperature in °F
+- **Manual Controls**
+  - **Force Suppress** — lock the relay to suppress watering regardless of forecast
+  - **Force Allow** — lock the relay to allow watering regardless of forecast
+  - **Clear Override** — return to automatic mode and immediately re-evaluate the forecast
+  - **Check Now** — force an immediate weather check outside the normal schedule
+- **30-Day History** — stacked bar chart (suppressed vs. allowed days) from SQLite
+- **Radar Map** — live RainViewer precipitation radar iframe, centered on your location,
+  zoomed to show your region
 
 The status panel auto-refreshes every 60 seconds via HTMX without a full page reload.
+All rain amounts display in **imperial units** (inches, °F).
 
 ---
 
-## Running as a Service
+## External Status API
 
-### Scheduler service
+A JSON API is available for integration with home dashboards (Home Assistant, MagicMirror,
+Grafana, custom scripts, etc.):
 
-```bash
-sudo cp /opt/rain-sensor/systemd/rain-sensor.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable rain-sensor
-sudo systemctl start rain-sensor
-sudo systemctl status rain-sensor
+```
+GET http://raspberrypi.local:5000/api/v1/status
 ```
 
-### Web dashboard service
+Example response:
 
-```bash
-sudo cp /opt/rain-sensor/systemd/rain-sensor-web.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable rain-sensor-web
-sudo systemctl start rain-sensor-web
-sudo systemctl status rain-sensor-web
+```json
+{
+  "relay_state": "allowed",
+  "suppress": false,
+  "override": null,
+  "override_active": false,
+  "recent_rain_in": 0.12,
+  "rainfall_24h_in": 0.12,
+  "rainfall_7d_in": 0.55,
+  "cache_age_min": 14.3,
+  "last_check": {
+    "ts": "2025-06-01T05:30:00+00:00",
+    "suppress": false,
+    "reasons": ["No significant rain forecast in next 3 h"],
+    "pop_max_pct": 10,
+    "forecast_rain_in": 0.0
+  },
+  "forecast": [
+    { "dt": 1748750400, "time": "05:00", "pop_pct": 10, "rain_in": 0.0, "temp_f": 74.1 }
+  ],
+  "thresholds": {
+    "rain_probability_pct": 50,
+    "rain_probability_hours": 3,
+    "forecast_rain_in": 0.10,
+    "recent_rain_in": 0.20
+  }
+}
 ```
 
-### View live logs
+---
 
-```bash
-journalctl -u rain-sensor -f
-journalctl -u rain-sensor-web -f
-# or
-tail -f /var/log/rain-sensor/rain_sensor.log
-```
+## Data Storage
+
+All runtime data is stored **outside the project directory** and will never be committed
+to git:
+
+| Path | Contents |
+|---|---|
+| `/var/lib/rain-sensor/rain_sensor.db` | SQLite database — full rainfall history and decision log |
+| `/var/lib/rain-sensor/state.json` | Current relay state, manual override, cached forecast |
+| `/var/log/rain-sensor/rain_sensor.log` | Application log |
+
+The SQLite database stores every hourly rainfall reading from OWM and a full log of every
+suppression decision, enabling historical queries and long-term trend analysis.
 
 ---
 
@@ -296,19 +387,19 @@ tail -f /var/log/rain-sensor/rain_sensor.log
 Watering is suppressed if **any one** of three independent conditions is met:
 
 1. **Recent rain** — accumulated `rain.1h` from the past 24 hours ≥ `recent_rain_mm`
-   *Example: 6 mm of rain yesterday → skip today's watering*
+   *Example: 6 mm (0.24 in) of rain yesterday → skip today's watering*
 
 2. **Forecast rain volume** — sum of `rain.1h` across the next `rain_probability_hours`
    hourly entries ≥ `forecast_rain_mm`
-   *Example: 3 mm forecast in the next 3 hours → suppress*
+   *Example: 3 mm (0.12 in) forecast in the next 3 hours → suppress*
 
 3. **Rain probability** — max `pop` (0–1) across the look-ahead window ≥
    `rain_probability_pct / 100`
    *Example: 70% chance of rain in the next 3 hours → suppress*
 
-All three data points come from the OWM **One Call API 3.0** `hourly[]` array.
-The full decision and all matching reasons are written to the log and to `state.json`
-for the dashboard.
+All three data points come from the OWM **One Call API 3.0** `hourly[]` array using
+`units=imperial`. The full decision and all matching reasons are written to the log and
+to the SQLite database for the dashboard history chart.
 
 ---
 
@@ -325,47 +416,70 @@ and the user running the script is in the `i2c` group:
 
 ```bash
 sudo usermod -aG i2c pi
-# log out and back in, or:
 newgrp i2c
 ```
+
+### Hunter X Pro not responding to relay
+
+Verify polarity with a multimeter across the SEN terminals:
+- **Relay de-energized** (NC closed): multimeter should read ~0 Ω (shorted) → Hunter suppresses
+- **Relay energized** (NC open): multimeter should read open → Hunter allows watering
+
+The Hunter holds ~24 V DC across the SEN terminals. Confirm by measuring voltage
+with nothing connected — you should read ~24 V DC.
 
 ### OWM API key errors
 
 ```bash
-python -m rain_sensor check   # watch for CRITICAL log lines
+pm2 logs rain-sensor   # watch for CRITICAL or ERROR lines
 ```
 
 - HTTP 401: key invalid or not yet activated (new keys take up to 2 hours)
 - HTTP 429: rate limit hit — reduce `cache_ttl_minutes` or check for multiple instances
 
-### `i2cdetect` shows no devices
+### pm2 processes not starting after reboot
 
-- Confirm `dtparam=i2c_arm=on` is in `/boot/config.txt` (raspi-config does this)
-- Try `sudo i2cdetect -y 0` (older Pi models use bus 0)
-- Check HAT is firmly seated on the 40-pin header
-
-### Service fails to start: "config.yaml not found"
-
-The service unit points at `/opt/rain-sensor/config.yaml`. Either:
-- Copy your config there: `cp /path/to/config.yaml /opt/rain-sensor/`
-- Or edit the `ExecStart` line in the service file to point at your actual path
+Re-run the full startup sequence:
+```bash
+pm2 delete all
+pm2 start ecosystem.config.js
+pm2 save --force
+sudo env PATH=$PATH:/usr/bin /usr/local/lib/node_modules/pm2/bin/pm2 startup systemd -u pi --hp /home/pi
+pm2 save --force
+```
 
 ### Dashboard shows "Loading…" forever
 
-The Flask web service may not be running:
 ```bash
-sudo systemctl status rain-sensor-web
-journalctl -u rain-sensor-web -n 50
+pm2 logs rain-sensor-web   # check for startup errors
+pm2 list                   # confirm rain-sensor-web is "online"
 ```
+
+### `ModuleNotFoundError: No module named 'rain_sensor'`
+
+The `PYTHONPATH` in `ecosystem.config.js` must point to `/home/pi/rainsensor`. Verify:
+
+```bash
+cat ecosystem.config.js   # env.PYTHONPATH should be /home/pi/rainsensor
+```
+
+---
+
+## API Testing (Bruno)
+
+A [Bruno](https://www.usebruno.com/) test collection is included at `tests/bruno/`.
+
+Import the collection into the Bruno desktop app, select the **Local** environment
+(pre-configured to `http://raspberrypi.local:5000`), and run all requests.
+
+The suite covers all endpoints: status, forecast, history, external API, force check,
+and all three override modes.
 
 ---
 
 ## Community References
 
-Similar projects worth exploring:
-
-- **[ahplummer/pirain](https://github.com/ahplummer/pirain)** — direct rain bypass for
-  Hunter/Rainbird systems, minimal approach
+- **[ahplummer/pirain](https://github.com/ahplummer/pirain)** — direct rain bypass for Hunter/Rainbird, minimal approach
 - **[miarond/RPi_Irrigation_Bypass_Sensor](https://github.com/miarond/RPi_Irrigation_Bypass_Sensor)** — Flask + CRON relay bypass
 - **[Dan-in-CA/SIP](https://github.com/Dan-in-CA/SIP)** — full irrigation control suite for Pi
 - **[jeroenterheerdt/HAsmartirrigation](https://github.com/jeroenterheerdt/HAsmartirrigation)** — Home Assistant evapotranspiration-based irrigation
@@ -375,18 +489,15 @@ Similar projects worth exploring:
 ## Safety Notes
 
 1. **Only connect to the SEN terminals.** Never connect the relay to a zone terminal or
-   the 24 VAC common — this would short out your transformer and damage the controller.
+   the 24 VAC common — this would short your transformer and damage the controller.
 
 2. **Remove the factory SEN jumper** before wiring. Leaving it in place will always hold
-   the circuit closed (watering always allowed) regardless of relay state.
+   the circuit closed regardless of relay state.
 
-3. **Do not use a bare GPIO pin** in place of the relay. The Hunter may put up to 24 VAC
-   across the SEN terminals. GPIO pins are 3.3 V / 16 mA — a direct connection destroys them.
+3. **Do not use a bare GPIO pin** in place of the relay. The Hunter holds ~24 V DC across
+   the SEN terminals. GPIO pins are rated 3.3 V / 16 mA — a direct connection destroys them.
 
-4. **The relay contacts (3 A rated) are far over-spec** for this dry-contact application.
-   There is no arc, contact wear, or voltage concern at 0 V.
-
-5. **Run as the `pi` user** (not root). The `i2c` group grants the necessary I2C bus access
+4. **Run as the `pi` user** (not root). The `i2c` group grants the necessary I2C bus access
    without elevated privileges.
 
 ---

@@ -7,8 +7,12 @@ is completely decoupled from hardware specifics.
 Wiring contract for this project:
   - Relay COM → Hunter X Pro SEN terminal ①
   - Relay NC  → Hunter X Pro SEN terminal ②
-  - Relay DE-ENERGIZED → NC is CLOSED → circuit closed → Hunter ALLOWS watering
-  - Relay ENERGIZED    → NC is OPEN   → circuit open   → Hunter SUPPRESSES watering
+  - Relay DE-ENERGIZED → NC is CLOSED → circuit shorted → Hunter SUPPRESSES watering
+  - Relay ENERGIZED    → NC is OPEN   → circuit open   → Hunter ALLOWS watering
+
+Note: Hunter X Pro SEN terminals sit at 24V DC. A shorted (closed) circuit
+mimics a wet rain sensor → suppresses watering. An open circuit mimics a dry
+sensor (or no sensor) → allows watering.
 """
 
 from __future__ import annotations
@@ -32,9 +36,9 @@ class RelayBackend(ABC):
     # ── Semantic helpers (preferred call sites) ───────────────────────────────
 
     def suppress_watering(self) -> None:
-        """Open the sensor circuit so the Hunter X Pro suppresses watering."""
-        self.energize()
+        """Close the sensor circuit (short SEN terminals) so the Hunter X Pro suppresses watering."""
+        self.de_energize()
 
     def allow_watering(self) -> None:
-        """Close the sensor circuit so the Hunter X Pro runs normally."""
-        self.de_energize()
+        """Open the sensor circuit so the Hunter X Pro runs normally."""
+        self.energize()

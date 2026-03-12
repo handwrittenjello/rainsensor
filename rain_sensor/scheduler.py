@@ -53,7 +53,7 @@ def check_and_set(
         forecast = cache.get_forecast(config.lat, config.lon, config.owm_api_key)
     except WeatherFetchError as exc:
         log.error("Weather fetch failed and no cache available: %s", exc)
-        log.warning("Fail-safe: de-energizing relay (allow watering)")
+        log.warning("Fail-safe: energizing relay (allow watering — open SEN circuit)")
         relay.allow_watering()
         state.set_relay_state("allowed")
         return None
@@ -76,11 +76,11 @@ def check_and_set(
 
     # ── Apply relay state ─────────────────────────────────────────────────────
     if decision.suppress:
-        log.info("DECISION: Suppress watering — energizing relay (opening NC contact)")
+        log.info("DECISION: Suppress watering — de-energizing relay (closing NC, shorting SEN)")
         relay.suppress_watering()
         state.set_relay_state("suppressed")
     else:
-        log.info("DECISION: Allow watering — de-energizing relay (closing NC contact)")
+        log.info("DECISION: Allow watering — energizing relay (opening NC, releasing SEN)")
         relay.allow_watering()
         state.set_relay_state("allowed")
 
