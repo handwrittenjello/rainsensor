@@ -1,0 +1,111 @@
+meta {
+  name: Get V1 Status (External API)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/v1/status
+  body: none
+  auth: none
+}
+
+tests {
+  test("responds 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  // relay
+  test("relay.state is a known value", function() {
+    expect(res.body.relay.state).to.be.oneOf(["suppressed", "allowed", "unknown"]);
+  });
+
+  test("relay.watering_active is boolean", function() {
+    expect(res.body.relay.watering_active).to.be.a("boolean");
+  });
+
+  test("relay.watering_active is false when suppressed", function() {
+    if (res.body.relay.state === "suppressed") {
+      expect(res.body.relay.watering_active).to.be.false;
+    }
+  });
+
+  // override
+  test("override.active is boolean", function() {
+    expect(res.body.override.active).to.be.a("boolean");
+  });
+
+  test("override.mode is null when not active", function() {
+    if (!res.body.override.active) {
+      expect(res.body.override.mode).to.be.null;
+    }
+  });
+
+  test("override.mode is suppress or allow when active", function() {
+    if (res.body.override.active) {
+      expect(res.body.override.mode).to.be.oneOf(["suppress", "allow"]);
+    }
+  });
+
+  // rainfall
+  test("rainfall totals are present and non-negative", function() {
+    expect(res.body.rainfall.last_24h_in).to.be.at.least(0);
+    expect(res.body.rainfall.last_7d_in).to.be.at.least(0);
+    expect(res.body.rainfall.last_30d_in).to.be.at.least(0);
+  });
+
+  test("rainfall totals are non-decreasing over time", function() {
+    expect(res.body.rainfall.last_7d_in).to.be.at.least(res.body.rainfall.last_24h_in);
+    expect(res.body.rainfall.last_30d_in).to.be.at.least(res.body.rainfall.last_7d_in);
+  });
+
+  // forecast
+  test("forecast is an array of at most 6 entries", function() {
+    expect(res.body.forecast).to.be.an("array");
+    expect(res.body.forecast.length).to.be.at.most(6);
+  });
+
+  test("each forecast entry has time_utc, pop_pct, rain_in, temp_f, desc", function() {
+    res.body.forecast.forEach(function(h) {
+      expect(h).to.have.property("time_utc");
+      expect(h).to.have.property("pop_pct");
+      expect(h).to.have.property("rain_in");
+      expect(h).to.have.property("temp_f");
+      expect(h).to.have.property("desc");
+    });
+  });
+
+  test("forecast time_utc is ISO 8601", function() {
+    res.body.forecast.forEach(function(h) {
+      expect(new Date(h.time_utc).toISOString()).to.be.a("string");
+    });
+  });
+
+  // last_decision
+  test("last_decision is present", function() {
+    expect(res.body).to.have.property("last_decision");
+  });
+
+  test("last_decision.reasons is an array", function() {
+    expect(res.body.last_decision.reasons).to.be.an("array");
+  });
+
+  // thresholds
+  test("thresholds contain all expected fields", function() {
+    const t = res.body.thresholds;
+    expect(t).to.have.property("rain_probability_pct");
+    expect(t).to.have.property("rain_probability_hours");
+    expect(t).to.have.property("forecast_rain_in");
+    expect(t).to.have.property("recent_rain_in");
+  });
+
+  test("rain_probability_pct is between 1 and 100", function() {
+    expect(res.body.thresholds.rain_probability_pct).to.be.within(1, 100);
+  });
+
+  // cache
+  test("cache_age_min is a number or null", function() {
+    const age = res.body.cache_age_min;
+    expect(age === null || typeof age === "number").to.be.true;
+  });
+}

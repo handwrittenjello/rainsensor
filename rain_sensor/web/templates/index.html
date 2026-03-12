@@ -5,10 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Rain Sensor Controller</title>
 
-  <!-- Leaflet.js (map) -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
   <!-- Chart.js (history chart) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
@@ -58,16 +54,16 @@
   <!-- ── Row 3: Radar map ─────────────────────────────────────────────────── -->
   <section class="card card-wide">
     <h2>Radar / Precipitation Map</h2>
-    <div id="map"></div>
+    <iframe id="map"
+      src="https://www.rainviewer.com/map.html?loc={{ lat }},{{ lon }},8&oC=true&oCS=1&c=9&o=83&lm=1&layer=radar&sm=1&sn=1&ts=2"
+      frameborder="0" allowfullscreen></iframe>
   </section>
 
 </main>
 
 <script>
 // ── Configuration injected from Flask ──────────────────────────────────────
-const LAT         = {{ lat }};
-const LON         = {{ lon }};
-const OWM_API_KEY = "{{ owm_api_key }}";
+// (lat/lon used only in the RainViewer iframe src above)
 
 // ── Status panel render (called by HTMX after each /api/status fetch) ─────
 // HTMX replaces the innerHTML of #status-card, so we render it ourselves
@@ -96,13 +92,21 @@ function renderStatus(d) {
   document.getElementById("header-badge").outerHTML =
     '<div id="header-badge">' + relayLabel(d.relay_state) + '</div>';
 
+  const overrideBanner = d.override
+    ? `<div class="override-banner">
+        ⚠ Manual override active — <strong>${d.override === 'suppress' ? 'Watering SUPPRESSED' : 'Watering FORCED ON'}</strong>.
+        Automatic weather checks are paused.
+       </div>`
+    : '';
+
   document.getElementById("status-card").innerHTML = `
     <h2>Current Status ${badge}</h2>
+    ${overrideBanner}
     <table class="status-table">
       <tr><td>Relay</td><td>${d.relay_state ?? "—"}</td></tr>
       <tr><td>Override</td><td>${d.override ?? "automatic"}</td></tr>
       <tr><td>Last check</td><td>${ts}</td></tr>
-      <tr><td>Recent rain (24 h)</td><td>${d.recent_rain_mm ?? "—"} mm</td></tr>
+      <tr><td>Recent rain (24 h)</td><td>${d.recent_rain_in != null ? d.recent_rain_in + ' in' : "—"}</td></tr>
       <tr><td>Cache age</td><td>${d.cache_age_min != null ? d.cache_age_min + " min" : "—"}</td></tr>
     </table>
     ${lc.reasons && lc.reasons.length ? '<p class="reasons"><strong>Last decision:</strong><br>' +
@@ -111,6 +115,7 @@ function renderStatus(d) {
       <button class="btn btn-suppress" onclick="sendOverride('suppress')">Force Suppress</button>
       <button class="btn btn-allow"    onclick="sendOverride('allow')">Force Allow</button>
       <button class="btn btn-clear"    onclick="sendOverride('clear')">Clear Override</button>
+      <button class="btn btn-check"    onclick="runCheck()">Check Now</button>
     </div>
   `;
 }
@@ -120,6 +125,20 @@ function updateBadge(el) {
 }
 
 // ── Override controls ──────────────────────────────────────────────────────
+async function runCheck() {
+  const btn = document.querySelector(".btn-check");
+  btn.disabled = true;
+  btn.textContent = "Checking…";
+  const resp = await fetch("/api/check", { method: "POST" });
+  btn.disabled = false;
+  btn.textContent = "Check Now";
+  if (resp.ok) {
+    htmx.trigger(document.getElementById("status-card"), "load");
+  } else {
+    alert("Check failed: " + (await resp.text()));
+  }
+}
+
 async function sendOverride(action) {
   const resp = await fetch("/api/override", {
     method: "POST",
@@ -151,7 +170,7 @@ async function loadForecast() {
         <div class="fh-bar" style="width:${h.pop_pct}%"></div>
       </div>
       <div class="fh-pop">${h.pop_pct}%</div>
-      <div class="fh-rain">${h.rain_mm > 0 ? h.rain_mm + " mm" : ""}</div>
+      <div class="fh-rain">${h.rain_in > 0 ? h.rain_in + ' in' : ""}</div>
       <div class="fh-desc">${h.desc}</div>
     </div>
   `).join("");
@@ -207,35 +226,8 @@ async function loadHistory() {
   });
 }
 
-// ── Leaflet radar map ──────────────────────────────────────────────────────
-function initMap() {
-  const map = L.map("map").setView([LAT, LON], 9);
-
-  // Base layer — OpenStreetMap
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap contributors",
-    maxZoom: 18,
-  }).addTo(map);
-
-  // OWM precipitation overlay (uses your API key — free tier)
-  L.tileLayer(
-    `https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=${OWM_API_KEY}`,
-    {
-      attribution: "© OpenWeatherMap",
-      opacity: 0.65,
-      maxZoom: 18,
-    }
-  ).addTo(map);
-
-  // Marker at configured location
-  L.marker([LAT, LON])
-    .addTo(map)
-    .bindPopup("Your location<br>Lat: " + LAT + " Lon: " + LON);
-}
-
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  initMap();
   loadHistory();
   // Status and forecast are loaded via HTMX hx-trigger="load"
 });

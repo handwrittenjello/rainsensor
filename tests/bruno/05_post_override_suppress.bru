@@ -1,0 +1,31 @@
+meta {
+  name: Override - Force Suppress
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/override
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "action": "suppress"
+  }
+}
+
+tests {
+  test("responds 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("ok is true", function() {
+    expect(res.body.ok).to.be.true;
+  });
+
+  test("relay_state is suppressed", function() {
+    expect(res.body.relay_state).to.equal("suppressed");
+  });
+}

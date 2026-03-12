@@ -1,0 +1,33 @@
+meta {
+  name: Force Weather Check
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/api/check
+  body: none
+  auth: none
+}
+
+tests {
+  test("responds 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("ok is true", function() {
+    expect(res.body.ok).to.be.true;
+  });
+
+  test("relay_state is a known value", function() {
+    expect(res.body.relay_state).to.be.oneOf(["suppressed", "allowed", "unknown"]);
+  });
+
+  test("reasons is an array", function() {
+    expect(res.body.reasons).to.be.an("array");
+  });
+
+  test("reasons is non-empty", function() {
+    expect(res.body.reasons.length).to.be.at.least(1);
+  });
+}

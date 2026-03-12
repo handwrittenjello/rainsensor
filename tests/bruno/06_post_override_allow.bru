@@ -1,0 +1,31 @@
+meta {
+  name: Override - Force Allow
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/override
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "action": "allow"
+  }
+}
+
+tests {
+  test("responds 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("ok is true", function() {
+    expect(res.body.ok).to.be.true;
+  });
+
+  test("relay_state is allowed", function() {
+    expect(res.body.relay_state).to.equal("allowed");
+  });
+}

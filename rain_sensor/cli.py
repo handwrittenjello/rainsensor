@@ -58,15 +58,37 @@ def _setup_logging(config) -> None:
 def _load(args) -> tuple:
     """Load config, state, relay, and cache from parsed args."""
     from rain_sensor.config import load_config
+    from rain_sensor.db import DatabaseManager
     from rain_sensor.state import StateManager
     from rain_sensor.relay import get_relay
     from rain_sensor.weather.cache import WeatherCache
 
-    cfg   = load_config(args.config)
-    state = StateManager(cfg.paths.state_file)
+    cfg = load_config(args.config)
+    db  = DatabaseManager(cfg.paths.db_file)
+
+    # One-time migration: import any existing JSON history into SQLite
+    _migrate_once(db, cfg.paths.state_file)
+
+    state = StateManager(cfg.paths.state_file, db=db)
     relay = get_relay(cfg.relay)
     cache = WeatherCache(state, cfg.weather.cache_ttl_minutes)
     return cfg, state, relay, cache
+
+
+def _migrate_once(db, state_file: str) -> None:
+    """Import JSON rainfall/decision history into SQLite (runs only if the DB is empty)."""
+    import json
+    from pathlib import Path
+    p = Path(state_file)
+    if not p.exists():
+        return
+    try:
+        with p.open() as f:
+            data = json.load(f)
+    except Exception:
+        return
+    if data.get("rainfall_history") or data.get("decision_log"):
+        db.migrate_from_json(data)
 
 
 # ── Subcommand handlers ───────────────────────────────────────────────────────

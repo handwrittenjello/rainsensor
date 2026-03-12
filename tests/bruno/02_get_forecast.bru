@@ -1,0 +1,48 @@
+meta {
+  name: Get Forecast
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/forecast
+  body: none
+  auth: none
+}
+
+tests {
+  test("responds 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("hourly array is present", function() {
+    expect(res.body.hourly).to.be.an("array");
+  });
+
+  test("hourly has at most 6 entries", function() {
+    expect(res.body.hourly.length).to.be.at.most(6);
+  });
+
+  test("each hourly entry has required fields", function() {
+    res.body.hourly.forEach(function(h) {
+      expect(h).to.have.property("ts");
+      expect(h).to.have.property("pop_pct");
+      expect(h).to.have.property("rain_in");
+      expect(h).to.have.property("temp_f");
+      expect(h).to.have.property("desc");
+    });
+  });
+
+  test("pop_pct is 0–100", function() {
+    res.body.hourly.forEach(function(h) {
+      expect(h.pop_pct).to.be.at.least(0);
+      expect(h.pop_pct).to.be.at.most(100);
+    });
+  });
+
+  test("rain_in is non-negative", function() {
+    res.body.hourly.forEach(function(h) {
+      expect(h.rain_in).to.be.at.least(0);
+    });
+  });
+}

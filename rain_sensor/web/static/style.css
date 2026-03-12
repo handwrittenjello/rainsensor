@@ -124,6 +124,21 @@ main {
   line-height: 1.7;
 }
 
+/* ── Override banner ─────────────────────────────────────────────────────── */
+.override-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #78350f;
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  padding: 0.5rem 0.85rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #fde68a;
+}
+
 /* ── Controls ────────────────────────────────────────────────────────────── */
 .controls {
   display: flex;
@@ -147,6 +162,8 @@ main {
 .btn-suppress { background: var(--red);   color: #fff; }
 .btn-allow    { background: var(--green); color: #fff; }
 .btn-clear    { background: var(--border); color: var(--text); }
+.btn-check    { background: var(--blue);  color: #fff; }
+.btn-check:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Forecast bars ───────────────────────────────────────────────────────── */
 #forecast-bars {
@@ -191,16 +208,9 @@ main {
 
 /* ── Radar map ───────────────────────────────────────────────────────────── */
 #map {
-  height: 400px;
+  width: 100%;
+  height: 500px;
   border-radius: 8px;
-  overflow: hidden;
   border: 1px solid var(--border);
+  display: block;
 }
-
-/* Override Leaflet popup to match dark theme */
-.leaflet-popup-content-wrapper {
-  background: var(--card);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-.leaflet-popup-tip { background: var(--card); }

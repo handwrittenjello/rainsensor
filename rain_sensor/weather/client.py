@@ -42,7 +42,7 @@ def fetch_forecast(lat: float, lon: float, api_key: str) -> dict[str, Any]:
         "lat": lat,
         "lon": lon,
         "appid": api_key,
-        "units": "metric",
+        "units": "imperial",
         "exclude": "minutely,alerts",
     }
 

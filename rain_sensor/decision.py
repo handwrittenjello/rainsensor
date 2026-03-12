@@ -13,6 +13,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+_MM_TO_IN = 0.0393701
+
+
+def _in(mm: float) -> str:
+    return f"{mm * _MM_TO_IN:.2f} in"
+
 
 @dataclass
 class Decision:
@@ -59,8 +65,8 @@ def evaluate(
     if recent_rain_mm >= recent_rain_mm_threshold:
         suppress = True
         reasons.append(
-            f"Recent rainfall {recent_rain_mm:.1f} mm "
-            f">= threshold {recent_rain_mm_threshold:.1f} mm in past 24 h"
+            f"Recent rainfall {_in(recent_rain_mm)} "
+            f">= threshold {_in(recent_rain_mm_threshold)} in past 24 h"
         )
 
     # ── Check 2: forecast rain volume in look-ahead window ────────────────────
@@ -70,8 +76,8 @@ def evaluate(
     if forecast_total >= forecast_rain_mm_threshold:
         suppress = True
         reasons.append(
-            f"Forecast rain {forecast_total:.1f} mm "
-            f">= threshold {forecast_rain_mm_threshold:.1f} mm "
+            f"Forecast rain {_in(forecast_total)} "
+            f">= threshold {_in(forecast_rain_mm_threshold)} "
             f"in next {rain_probability_hours} h"
         )
 
@@ -92,8 +98,8 @@ def evaluate(
         reasons.append(
             f"No suppression criteria met — "
             f"PoP max {max_pop * 100:.0f}%, "
-            f"forecast {forecast_total:.1f} mm, "
-            f"recent {recent_rain_mm:.1f} mm"
+            f"forecast {_in(forecast_total)}, "
+            f"recent {_in(recent_rain_mm)}"
         )
 
     return Decision(

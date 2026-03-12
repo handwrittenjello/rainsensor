@@ -25,9 +25,10 @@ _DECISION_KEEP_DAYS   = 35   # keep a bit more than 30 for chart margin
 
 
 class StateManager:
-    def __init__(self, state_file: str) -> None:
+    def __init__(self, state_file: str, db=None) -> None:
         self._path = Path(state_file)
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._db = db  # DatabaseManager or None
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -83,9 +84,10 @@ class StateManager:
         """
         Upsert hourly rainfall records keyed by OWM `dt` (Unix epoch).
         A record is: {"dt": int, "ts": ISO str, "mm": float}
-        Existing entries with the same dt are overwritten (no double-counting
-        when the same hour appears in two consecutive fetches).
         """
+        if self._db:
+            self._db.upsert_rainfall(records)
+            return
         data = self.load()
         existing: dict[int, dict] = {
             r["dt"]: r for r in data.get("rainfall_history", [])
@@ -96,7 +98,9 @@ class StateManager:
         self.save(data)
 
     def trim_rainfall_history(self) -> None:
-        """Drop records older than _RAINFALL_KEEP_HOURS."""
+        """Drop records older than _RAINFALL_KEEP_HOURS (JSON path only; SQLite keeps all)."""
+        if self._db:
+            return  # SQLite retains all history indefinitely
         data = self.load()
         cutoff = datetime.now(timezone.utc) - timedelta(hours=_RAINFALL_KEEP_HOURS)
         kept = [
@@ -108,6 +112,8 @@ class StateManager:
 
     def get_recent_rainfall_mm(self, hours: int = 24) -> float:
         """Sum rainfall records from the past *hours* hours."""
+        if self._db:
+            return self._db.get_recent_rainfall_mm(hours=hours)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         total = 0.0
         for rec in self.get_rainfall_history():
@@ -146,13 +152,15 @@ class StateManager:
 
     def append_decision(self, decision_record: dict) -> None:
         """
-        Append a decision record and trim to _DECISION_KEEP_DAYS days.
+        Append a decision record.
         Expected keys: ts, suppress, reasons, pop_max, forecast_rain_mm, recent_rain_mm
         """
+        if self._db:
+            self._db.append_decision(decision_record)
+            return
         data = self.load()
         log_entries: list[dict] = data.get("decision_log", [])
         log_entries.append(decision_record)
-
         cutoff = datetime.now(timezone.utc) - timedelta(days=_DECISION_KEEP_DAYS)
         log_entries = [
             e for e in log_entries
@@ -163,8 +171,17 @@ class StateManager:
 
     def get_decision_log(self, days: int = 30) -> list[dict]:
         """Return decision records from the last *days* days, oldest first."""
+        if self._db:
+            return self._db.get_decisions(days=days)
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         return [
             e for e in self.load().get("decision_log", [])
             if datetime.fromisoformat(e["ts"]) >= cutoff
         ]
+
+    def get_last_decision(self) -> Optional[dict]:
+        """Return the most recent decision record, or None."""
+        if self._db:
+            return self._db.get_last_decision()
+        entries = self.load().get("decision_log") or []
+        return entries[-1] if entries else None

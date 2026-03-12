@@ -62,6 +62,7 @@ class WeatherConfig:
 class PathsConfig:
     log_file:   str = "/var/log/rain-sensor/rain_sensor.log"
     state_file: str = "/var/lib/rain-sensor/state.json"
+    db_file:    str = "/var/lib/rain-sensor/rain_sensor.db"
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,7 @@ def load_config(yaml_path: str, env_path: Optional[str] = None) -> Config:
         paths=PathsConfig(
             log_file=paths_raw.get("log_file", "/var/log/rain-sensor/rain_sensor.log"),
             state_file=paths_raw.get("state_file", "/var/lib/rain-sensor/state.json"),
+            db_file=paths_raw.get("db_file", "/var/lib/rain-sensor/rain_sensor.db"),
         ),
         logging=LoggingConfig(
             level=log_raw.get("level", "INFO").upper(),

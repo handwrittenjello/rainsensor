@@ -1,0 +1,23 @@
+meta {
+  name: Override - Invalid Action (expect 400)
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{base_url}}/api/override
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "action": "explode"
+  }
+}
+
+tests {
+  test("responds 400 for unknown action", function() {
+    expect(res.status).to.equal(400);
+  });
+}

@@ -1,0 +1,53 @@
+meta {
+  name: Get 30-Day History
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/history
+  body: none
+  auth: none
+}
+
+tests {
+  test("responds 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("history array is present", function() {
+    expect(res.body.history).to.be.an("array");
+  });
+
+  test("history has exactly 30 entries", function() {
+    expect(res.body.history.length).to.equal(30);
+  });
+
+  test("each entry has date, suppressed, allowed", function() {
+    res.body.history.forEach(function(e) {
+      expect(e).to.have.property("date");
+      expect(e).to.have.property("suppressed");
+      expect(e).to.have.property("allowed");
+    });
+  });
+
+  test("dates are in YYYY-MM-DD format", function() {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    res.body.history.forEach(function(e) {
+      expect(e.date).to.match(dateRegex);
+    });
+  });
+
+  test("suppressed and allowed are non-negative integers", function() {
+    res.body.history.forEach(function(e) {
+      expect(e.suppressed).to.be.at.least(0);
+      expect(e.allowed).to.be.at.least(0);
+    });
+  });
+
+  test("history is in chronological order", function() {
+    const dates = res.body.history.map(function(e) { return e.date; });
+    const sorted = [...dates].sort();
+    expect(dates).to.deep.equal(sorted);
+  });
+}

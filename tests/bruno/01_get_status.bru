@@ -1,0 +1,39 @@
+meta {
+  name: Get Status
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/status
+  body: none
+  auth: none
+}
+
+tests {
+  test("responds 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("relay_state is a known value", function() {
+    expect(res.body.relay_state).to.be.oneOf(["suppressed", "allowed", "unknown"]);
+  });
+
+  test("recent_rain_in is a non-negative number", function() {
+    expect(res.body.recent_rain_in).to.be.a("number");
+    expect(res.body.recent_rain_in).to.be.at.least(0);
+  });
+
+  test("cache_age_min is a number or null", function() {
+    const age = res.body.cache_age_min;
+    expect(age === null || typeof age === "number").to.be.true;
+  });
+
+  test("last_check object is present", function() {
+    expect(res.body).to.have.property("last_check");
+  });
+
+  test("last_check.reasons is an array", function() {
+    expect(res.body.last_check.reasons).to.be.an("array");
+  });
+}

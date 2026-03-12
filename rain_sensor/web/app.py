@@ -23,6 +23,8 @@ from rain_sensor.weather.cache import WeatherCache
 
 log = logging.getLogger(__name__)
 
+_MM_TO_IN = 0.0393701   # millimetres → inches
+
 
 def create_app(
     config: Config,
@@ -49,25 +51,24 @@ def create_app(
 
     @app.route("/api/status")
     def api_status():
-        data = state.load()
+        data           = state.load()
         relay_state    = data.get("relay_state", "unknown")
         override       = data.get("manual_override")
-        last_entries   = data.get("decision_log") or []
-        last           = last_entries[-1] if last_entries else None
-        recent_rain    = state.get_recent_rainfall_mm(hours=24)
+        last           = state.get_last_decision()
+        recent_rain_mm = state.get_recent_rainfall_mm(hours=24)
         cache_age      = state.get_cached_forecast_age_minutes()
 
         return jsonify({
             "relay_state":    relay_state,
             "override":       override,
-            "recent_rain_mm": round(recent_rain, 2),
+            "recent_rain_in": round(recent_rain_mm * _MM_TO_IN, 3),
             "cache_age_min":  round(cache_age, 1) if cache_age is not None else None,
             "last_check": {
-                "ts":               last["ts"]              if last else None,
-                "suppress":         last["suppress"]        if last else None,
-                "reasons":          last.get("reasons", []) if last else [],
-                "pop_max_pct":      round(last["pop_max"] * 100) if last else None,
-                "forecast_rain_mm": last.get("forecast_rain_mm") if last else None,
+                "ts":               last["ts"]                                          if last else None,
+                "suppress":         last["suppress"]                                    if last else None,
+                "reasons":          last.get("reasons", [])                             if last else [],
+                "pop_max_pct":      round(last["pop_max"] * 100)                        if last else None,
+                "forecast_rain_in": round(last["forecast_rain_mm"] * _MM_TO_IN, 3)     if last else None,
             },
         })
 
@@ -85,11 +86,11 @@ def create_app(
             dt = h.get("dt", 0)
             ts = datetime.fromtimestamp(dt, tz=timezone.utc).strftime("%H:%M")
             hourly.append({
-                "ts":        ts,
-                "pop_pct":   round(h.get("pop", 0.0) * 100),
-                "rain_mm":   round(h.get("rain", {}).get("1h", 0.0), 2),
-                "temp_c":    round(h.get("temp", 0.0), 1),
-                "desc":      h.get("weather", [{}])[0].get("description", ""),
+                "ts":       ts,
+                "pop_pct":  round(h.get("pop", 0.0) * 100),
+                "rain_in":  round(h.get("rain", {}).get("1h", 0.0) * _MM_TO_IN, 3),
+                "temp_f":   round(h.get("temp", 0.0), 1),
+                "desc":     h.get("weather", [{}])[0].get("description", ""),
             })
         return jsonify({"hourly": hourly})
 
@@ -119,6 +120,92 @@ def create_app(
 
         return jsonify({"history": result})
 
+    # ── API v1: comprehensive status for external dashboards ─────────────────
+
+    @app.route("/api/v1/status")
+    def api_v1_status():
+        """
+        Public read-only endpoint for external dashboards and integrations.
+
+        Returns a single JSON object with:
+          relay          — current physical relay state and what it means
+          override       — manual override info
+          rainfall       — accumulated totals for 24 h / 7 d / 30 d (inches)
+          forecast       — next 6 hourly OWM entries
+          last_decision  — most recent automatic check result
+          thresholds     — configured suppression thresholds
+          cache          — age of the OWM forecast cache
+        """
+        data           = state.load()
+        relay_state    = data.get("relay_state", "unknown")
+        override       = data.get("manual_override")
+        last           = state.get_last_decision()
+        cache_age      = state.get_cached_forecast_age_minutes()
+
+        rain_24h_mm  = state.get_recent_rainfall_mm(hours=24)
+        rain_7d_mm   = state.get_recent_rainfall_mm(hours=7 * 24)
+        rain_30d_mm  = state.get_recent_rainfall_mm(hours=30 * 24)
+
+        # Hourly forecast (next 6 h)
+        cached_fc   = state.get_cached_forecast() or {}
+        hourly_raw  = cached_fc.get("hourly", [])[:6]
+        hourly_out  = []
+        for h in hourly_raw:
+            dt = h.get("dt", 0)
+            hourly_out.append({
+                "time_utc":  datetime.fromtimestamp(dt, tz=timezone.utc).isoformat(),
+                "pop_pct":   round(h.get("pop", 0.0) * 100),
+                "rain_in":   round(h.get("rain", {}).get("1h", 0.0) * _MM_TO_IN, 3),
+                "temp_f":    round(h.get("temp", 0.0), 1),
+                "desc":      h.get("weather", [{}])[0].get("description", ""),
+            })
+
+        return jsonify({
+            "relay": {
+                "state":            relay_state,             # "suppressed" | "allowed" | "unknown"
+                "watering_active":  relay_state != "suppressed",
+            },
+            "override": {
+                "active":  override is not None,
+                "mode":    override,                         # "suppress" | "allow" | null
+            },
+            "rainfall": {
+                "last_24h_in":  round(rain_24h_mm  * _MM_TO_IN, 3),
+                "last_7d_in":   round(rain_7d_mm   * _MM_TO_IN, 3),
+                "last_30d_in":  round(rain_30d_mm  * _MM_TO_IN, 3),
+            },
+            "forecast": hourly_out,
+            "last_decision": {
+                "ts":               last["ts"]                                       if last else None,
+                "suppress":         last["suppress"]                                 if last else None,
+                "reasons":          last.get("reasons", [])                          if last else [],
+                "pop_max_pct":      round(last["pop_max"] * 100)                     if last else None,
+                "forecast_rain_in": round(last["forecast_rain_mm"] * _MM_TO_IN, 3)  if last else None,
+                "recent_rain_in":   round(last["recent_rain_mm"]   * _MM_TO_IN, 3)  if last else None,
+            },
+            "thresholds": {
+                "rain_probability_pct":   config.thresholds.rain_probability_pct,
+                "rain_probability_hours": config.thresholds.rain_probability_hours,
+                "forecast_rain_in":       round(config.thresholds.forecast_rain_mm * _MM_TO_IN, 3),
+                "recent_rain_in":         round(config.thresholds.recent_rain_mm   * _MM_TO_IN, 3),
+            },
+            "cache_age_min": round(cache_age, 1) if cache_age is not None else None,
+        })
+
+    # ── API: force weather check ──────────────────────────────────────────────
+
+    @app.route("/api/check", methods=["POST"])
+    def api_check():
+        from rain_sensor.scheduler import check_and_set
+        log.info("Web UI: forced weather check requested")
+        decision = check_and_set(config, relay, state, cache)
+        return jsonify({
+            "ok": True,
+            "relay_state": state.get_relay_state(),
+            "suppress": decision.suppress if decision else None,
+            "reasons": decision.reasons if decision else ["Manual override active — check skipped"],
+        })
+
     # ── API: manual override ──────────────────────────────────────────────────
 
     @app.route("/api/override", methods=["POST"])
@@ -142,7 +229,9 @@ def create_app(
 
         elif action == "clear":
             state.clear_manual_override()
-            log.info("Web UI: manual override cleared")
+            log.info("Web UI: manual override cleared — running immediate weather check")
+            from rain_sensor.scheduler import check_and_set
+            check_and_set(config, relay, state, cache)
             return jsonify({"ok": True, "relay_state": state.get_relay_state()})
 
         else:
